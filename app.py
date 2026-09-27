@@ -40,22 +40,40 @@ def load_json(path):
         return json.load(f)
 
 
-def run_pipeline(ticker: str, start_date: str):
-    """Re-run the full data -> feature -> sentiment -> model pipeline for a given ticker."""
+def run_pipeline_live(ticker: str, start_date: str):
+    """
+    Re-run the full data -> feature -> sentiment -> model pipeline for a
+    given ticker, giving live step-by-step feedback via st.status() rather
+    than blocking silently for however long the whole chain takes. This
+    also means the browser keeps receiving updates from the server
+    throughout, instead of one long silent request that some hosting
+    platforms may kill for looking idle/hung.
+    """
     steps = [
-        [sys.executable, "data_collection.py", "--ticker", ticker, "--start", start_date],
-        [sys.executable, "features.py"],
-        [sys.executable, "sentiment.py", "--ticker", ticker, "--company", ticker, "--start", start_date],
-        [sys.executable, "models.py"],
-        [sys.executable, "explain.py"],
+        ("Downloading price history", [sys.executable, "data_collection.py", "--ticker", ticker, "--start", start_date]),
+        ("Engineering technical indicators", [sys.executable, "features.py"]),
+        ("Fetching & scoring news sentiment", [sys.executable, "sentiment.py", "--ticker", ticker, "--company", ticker, "--start", start_date]),
+        ("Training LSTM + XGBoost + Prophet ensemble", [sys.executable, "models.py"]),
+        ("Computing SHAP explanations", [sys.executable, "explain.py"]),
     ]
+
     logs = []
-    for step in steps:
-        result = subprocess.run(step, capture_output=True, text=True)
-        logs.append((", ".join(step), result.returncode, result.stdout[-1500:], result.stderr[-1500:]))
-        if result.returncode != 0:
-            return logs, False
-    return logs, True
+    all_ok = True
+    with st.status("Running NeuroTicker pipeline...", expanded=True) as status:
+        for label, cmd in steps:
+            st.write(f"▶ {label} ...")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            logs.append((label, ", ".join(cmd), result.returncode, result.stdout[-1500:], result.stderr[-1500:]))
+            if result.returncode != 0:
+                st.write(f"❌ {label} failed (exit code {result.returncode})")
+                all_ok = False
+                status.update(label=f"Pipeline failed at: {label}", state="error")
+                break
+            else:
+                st.write(f"✅ {label} done")
+        if all_ok:
+            status.update(label="Pipeline completed successfully", state="complete")
+    return logs, all_ok
 
 
 def xgb_predict_with_sentiment(feature_row: dict, sentiment_override: float):
@@ -83,16 +101,15 @@ ticker = st.sidebar.text_input("Ticker symbol", value="AAPL").upper().strip()
 start_date = st.sidebar.date_input("History start date", value=pd.to_datetime("2015-01-01"))
 
 if st.sidebar.button("🔄 Run / refresh pipeline for this ticker", type="primary"):
-    with st.spinner(f"Running full pipeline for {ticker} ..."):
-        logs, ok = run_pipeline(ticker, str(start_date))
+    logs, ok = run_pipeline_live(ticker, str(start_date))
     st.cache_data.clear()
     if ok:
         st.sidebar.success("Pipeline completed successfully.")
     else:
         st.sidebar.error("Pipeline failed — see details below.")
-    with st.sidebar.expander("Pipeline logs"):
-        for name, code, out, err in logs:
-            st.write(f"**{name}** (exit {code})")
+    with st.sidebar.expander("Pipeline logs", expanded=not ok):
+        for label, cmd_str, code, out, err in logs:
+            st.write(f"**{label}** — `{cmd_str}` (exit {code})")
             if out:
                 st.code(out)
             if err:

@@ -6,13 +6,23 @@
 # Transformers) are heavy (multi-GB build). Render's free tier may run out
 # of build time/memory/disk — if the build fails on the free plan, switch
 # `plan: free` below to `starter` (or higher) in the Render dashboard.
+#
+# IMPORTANT: Prophet's Stan backend (cmdstanpy) compiles itself on first
+# use, which can take several minutes and use significant CPU/RAM. If that
+# compile happens lazily during a live web request (e.g. when a user
+# clicks "Run pipeline" in the app), it's exactly the kind of long, silent
+# operation that gets killed by a platform before it can finish -- which
+# looks like the app "doing nothing" with no error at all. The extra
+# `python -c "import cmdstanpy; cmdstanpy.install_cmdstan()"` below forces
+# that compilation to happen during the BUILD phase instead, which gets a
+# much larger time/resource budget than a single request does.
 
 services:
   - type: web
     name: neuroticker
     runtime: python
     plan: free
-    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt && python -c \"import cmdstanpy; cmdstanpy.install_cmdstan()\""
     startCommand: "streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
     envVars:
       - key: PYTHON_VERSION
