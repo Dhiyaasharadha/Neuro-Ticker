@@ -4,8 +4,11 @@ __pycache__/
 *.pyo
 .DS_Store
 
-# Generated data/model artifacts (regenerate via the pipeline scripts)
-data/
+# Generated data/model artifacts are normally excluded here, EXCEPT we
+# deliberately commit a pre-generated snapshot (see data/ below) so a fresh
+# deploy shows real results immediately instead of an empty dashboard.
+# The "Run / refresh pipeline" button in the app still regenerates these
+# live on demand.
 models_cache/
 
 # Runtime logs / pids
