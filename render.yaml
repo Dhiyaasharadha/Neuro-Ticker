@@ -1,0 +1,20 @@
+# Render Blueprint — lets you deploy this whole app via
+# https://dashboard.render.com/blueprints  ->  "New Blueprint Instance"
+# pointed at this repo, instead of manually filling in a Web Service form.
+#
+# NOTE: this app's dependencies (TensorFlow, PyTorch, Prophet, SHAP,
+# Transformers) are heavy (multi-GB build). Render's free tier may run out
+# of build time/memory/disk — if the build fails on the free plan, switch
+# `plan: free` below to `starter` (or higher) in the Render dashboard.
+
+services:
+  - type: web
+    name: neuroticker
+    runtime: python
+    plan: free
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+    autoDeploy: true

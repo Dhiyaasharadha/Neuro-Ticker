@@ -1,0 +1,18 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Generated data/model artifacts (regenerate via the pipeline scripts)
+data/
+models_cache/
+
+# Runtime logs / pids
+streamlit.log
+streamlit.pid
+*.log
+
+# Env files if ever added
+.env
+.env.local
