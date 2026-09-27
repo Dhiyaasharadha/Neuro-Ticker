@@ -42,6 +42,47 @@ def download_real_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
+def download_real_prices_stooq(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """
+    Fallback real-data source: Stooq's plain CSV export endpoint.
+
+    Yahoo Finance's undocumented API (what yfinance scrapes) frequently
+    rate-limits or outright blocks requests coming from cloud/datacenter IP
+    ranges (Render, AWS, Railway, Heroku, ...) even though those servers
+    have completely normal internet access -- it's Yahoo's bot detection,
+    not a connectivity problem. Stooq's CSV export endpoint is a plain,
+    unauthenticated HTTP download with no such bot-blocking historically,
+    so it's a good second real-data attempt before giving up and using
+    synthetic data.
+    """
+    import requests
+    import io as _io
+
+    start_compact = pd.to_datetime(start).strftime("%Y%m%d")
+    end_compact = pd.to_datetime(end).strftime("%Y%m%d")
+    symbol = f"{ticker.lower()}.us"
+
+    url = (
+        f"https://stooq.com/q/d/l/?s={symbol}&d1={start_compact}&d2={end_compact}&i=d"
+    )
+    resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+
+    text = resp.text.strip()
+    if not text or text.lower().startswith("no data") or "<html" in text.lower():
+        raise RuntimeError(f"Stooq returned no usable data for {ticker} ({text[:80]!r})")
+
+    df = pd.read_csv(_io.StringIO(text))
+    if df.empty or "Close" not in df.columns:
+        raise RuntimeError(f"Stooq CSV for {ticker} was empty or malformed")
+
+    df.columns = [c.lower() for c in df.columns]
+    df.rename(columns={"date": "date"}, inplace=True)
+    df["date"] = pd.to_datetime(df["date"])
+    df["adj_close"] = df["close"]
+    return df
+
+
 def generate_synthetic_prices(ticker: str, start: str, end: str, seed: int = 42) -> pd.DataFrame:
     """
     Generate a realistic synthetic daily OHLCV series using a geometric
@@ -106,18 +147,26 @@ def main():
     print(f"[data_collection] Ticker={args.ticker}  Start={args.start}  End={end}")
 
     df = None
+    source = None
     try:
         print("[data_collection] Attempting real download via yfinance ...")
         df = download_real_prices(args.ticker, args.start, end)
-        print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Yahoo Finance.")
+        print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Yahoo Finance (yfinance).")
         source = "yfinance (real)"
     except Exception as e:
-        print(f"[data_collection] Real download failed: {e}")
-        if not args.allow_synthetic:
-            sys.exit(1)
-        print("[data_collection] Falling back to SYNTHETIC data for offline testing.")
-        df = generate_synthetic_prices(args.ticker, args.start, end)
-        source = "synthetic (offline fallback)"
+        print(f"[data_collection] yfinance download failed: {e}")
+        try:
+            print("[data_collection] Attempting real download via Stooq (fallback data source) ...")
+            df = download_real_prices_stooq(args.ticker, args.start, end)
+            print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Stooq.")
+            source = "stooq (real)"
+        except Exception as e2:
+            print(f"[data_collection] Stooq download also failed: {e2}")
+            if not args.allow_synthetic:
+                sys.exit(1)
+            print("[data_collection] Both real sources failed. Falling back to SYNTHETIC data for offline testing.")
+            df = generate_synthetic_prices(args.ticker, args.start, end)
+            source = "synthetic (offline fallback)"
 
     df["ticker"] = args.ticker
     df["data_source"] = source
