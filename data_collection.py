@@ -23,6 +23,64 @@ import numpy as np
 import pandas as pd
 
 
+def download_real_prices_alphavantage(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """
+    Preferred real-data source: Alpha Vantage's official TIME_SERIES_DAILY
+    endpoint. Unlike yfinance (which scrapes Yahoo's undocumented internal
+    API) or Stooq's CSV export (an unofficial convenience endpoint), this
+    is a real, documented, key-authenticated API meant for programmatic
+    access -- so it doesn't have the cloud-IP bot-detection problems that
+    make scraping-based sources flaky on hosting platforms. Requires a
+    free API key (https://www.alphavantage.co/support/#api-key) set as the
+    ALPHAVANTAGE_API_KEY environment variable. If that env var isn't set,
+    this source is skipped (not treated as an error).
+    """
+    import requests
+
+    api_key = os.environ.get("ALPHAVANTAGE_API_KEY")
+    if not api_key:
+        raise RuntimeError("ALPHAVANTAGE_API_KEY environment variable not set -- skipping this source")
+
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "TIME_SERIES_DAILY",
+        "symbol": ticker,
+        "outputsize": "full",  # up to ~20 years of daily data in one call
+        "apikey": api_key,
+    }
+    resp = requests.get(url, params=params, timeout=20)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    if "Time Series (Daily)" not in payload:
+        note = payload.get("Note") or payload.get("Information") or payload.get("Error Message") or str(payload)[:200]
+        raise RuntimeError(f"Alpha Vantage did not return time series data: {note}")
+
+    series = payload["Time Series (Daily)"]
+    rows = []
+    for date_str, values in series.items():
+        rows.append({
+            "date": date_str,
+            "open": float(values["1. open"]),
+            "high": float(values["2. high"]),
+            "low": float(values["3. low"]),
+            "close": float(values["4. close"]),
+            "adj_close": float(values["4. close"]),
+            "volume": int(values["5. volume"]),
+        })
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+
+    start_ts, end_ts = pd.to_datetime(start), pd.to_datetime(end)
+    df = df[(df["date"] >= start_ts) & (df["date"] <= end_ts)].reset_index(drop=True)
+
+    if df.empty:
+        raise RuntimeError(f"Alpha Vantage returned data, but none in the requested date range {start}..{end}")
+    return df
+
+
 def download_real_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     """Download real historical prices via yfinance."""
     import yfinance as yf
@@ -149,24 +207,31 @@ def main():
     df = None
     source = None
     try:
-        print("[data_collection] Attempting real download via yfinance ...")
-        df = download_real_prices(args.ticker, args.start, end)
-        print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Yahoo Finance (yfinance).")
-        source = "yfinance (real)"
-    except Exception as e:
-        print(f"[data_collection] yfinance download failed: {e}")
+        print("[data_collection] Attempting real download via Alpha Vantage (official API) ...")
+        df = download_real_prices_alphavantage(args.ticker, args.start, end)
+        print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Alpha Vantage.")
+        source = "alphavantage (real)"
+    except Exception as e0:
+        print(f"[data_collection] Alpha Vantage failed/skipped: {e0}")
         try:
-            print("[data_collection] Attempting real download via Stooq (fallback data source) ...")
-            df = download_real_prices_stooq(args.ticker, args.start, end)
-            print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Stooq.")
-            source = "stooq (real)"
-        except Exception as e2:
-            print(f"[data_collection] Stooq download also failed: {e2}")
-            if not args.allow_synthetic:
-                sys.exit(1)
-            print("[data_collection] Both real sources failed. Falling back to SYNTHETIC data for offline testing.")
-            df = generate_synthetic_prices(args.ticker, args.start, end)
-            source = "synthetic (offline fallback)"
+            print("[data_collection] Attempting real download via yfinance ...")
+            df = download_real_prices(args.ticker, args.start, end)
+            print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Yahoo Finance (yfinance).")
+            source = "yfinance (real)"
+        except Exception as e:
+            print(f"[data_collection] yfinance download failed: {e}")
+            try:
+                print("[data_collection] Attempting real download via Stooq (fallback data source) ...")
+                df = download_real_prices_stooq(args.ticker, args.start, end)
+                print(f"[data_collection] SUCCESS: downloaded {len(df)} real rows from Stooq.")
+                source = "stooq (real)"
+            except Exception as e2:
+                print(f"[data_collection] Stooq download also failed: {e2}")
+                if not args.allow_synthetic:
+                    sys.exit(1)
+                print("[data_collection] All real sources failed. Falling back to SYNTHETIC data for offline testing.")
+                df = generate_synthetic_prices(args.ticker, args.start, end)
+                source = "synthetic (offline fallback)"
 
     df["ticker"] = args.ticker
     df["data_source"] = source

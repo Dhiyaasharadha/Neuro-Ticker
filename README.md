@@ -174,15 +174,38 @@ feeds (Yahoo Finance headline RSS, Google News RSS) plus pretrained
 
 If either the price download or the news/model download fails — for
 example because you're on a network with outbound access restrictions, or
-temporarily offline — **both scripts automatically and transparently fall
-back** to clearly-labeled synthetic data (a realistic simulated price
-series, and template-generated headlines scored by a small local model)
-so the rest of the pipeline keeps working end-to-end rather than crashing.
-Every output file and the dashboard itself show which mode was used
-(`data_source` / `headline_source` / `model_source` columns and an on-screen
-banner). **On a machine with normal internet access, you'll get real AAPL
-price data and real FinBERT-scored news automatically — no code changes
-needed.**
+temporarily offline, or a hosting platform's IP range is being
+bot-blocked by Yahoo Finance/Stooq — **both scripts automatically and
+transparently fall back** to clearly-labeled synthetic data (a realistic
+simulated price series, and template-generated headlines scored by a
+small local model) so the rest of the pipeline keeps working end-to-end
+rather than crashing. Every output file and the dashboard itself show
+which mode was used (`data_source` / `headline_source` / `model_source`
+columns and an on-screen banner).
+
+### Recommended: Alpha Vantage for reliable real data on cloud hosts
+
+`yfinance` and Stooq are both scraping-style sources (they weren't built
+as authenticated public APIs), and cloud/datacenter IP ranges (Render,
+AWS, Railway, Heroku, ...) are frequently rate-limited or outright
+blocked by their bot detection — even though the host itself has
+completely normal internet access. This is a very common, well-known
+issue and not specific to any one platform.
+
+For reliable real price data on a hosted deployment, get a **free** API
+key from Alpha Vantage (https://www.alphavantage.co/support/#api-key —
+just an email, no credit card, instant) and set it as an environment
+variable:
+
+```
+ALPHAVANTAGE_API_KEY=your_key_here
+```
+
+`data_collection.py` tries sources in this order: **Alpha Vantage (if a
+key is set) → yfinance → Stooq → synthetic fallback**. On a normal
+laptop/desktop with unrestricted internet, yfinance alone is usually
+enough. On a cloud host, setting `ALPHAVANTAGE_API_KEY` is the most
+reliable way to guarantee real data.
 
 One consequence worth knowing: the synthetic price series and synthetic
 headline series are generated independently of each other (there's no

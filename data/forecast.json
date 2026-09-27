@@ -5,13 +5,13 @@
   "current_close": 8.582068135748367,
   "predictions": {
     "xgboost": 8.599932670593262,
-    "lstm": 8.560773873352911,
+    "lstm": 8.237938433771241,
     "prophet": 5.318954714933543,
-    "ensemble": 7.493220419626572
+    "ensemble": 7.385608606432682
   },
   "confidence_interval_90": {
-    "lower": 7.481119262799261,
-    "upper": 7.527108784317677
+    "lower": 7.373507449605372,
+    "upper": 7.419496971123787
   },
   "current_sentiment": 0.4248388037085532,
   "current_features": {
